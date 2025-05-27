@@ -5,8 +5,10 @@ import (
 )
 
 type configuration struct {
-	TeamName string
-	TeamId   string
+	TeamName    string
+	TwilioSid   string
+	TwilioToken string
+	TeamId      string
 }
 
 func (p *Plugin) getConfiguration() *configuration {

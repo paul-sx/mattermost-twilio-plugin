@@ -40,12 +40,13 @@ func (p *Plugin) MessageHasBeenPosted(c *plugin.Context, post *model.Post) {
 		return
 	}
 
-	pattern := `<[+]\d{11}>`
+	// Limited here to Country Code +1
+	pattern := `<([+]1\d{10})>`
 	re := regexp.MustCompile(pattern)
 
-	match := re.FindString(channel.Name)
+	match := re.FindStringSubmatch(channel.Name)
 
-	if match == "" {
+	if match == nil {
 		return
 	}
 
