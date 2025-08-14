@@ -3,6 +3,7 @@ module github.com/paul-sx/mattermost-twilio-plugin
 go 1.24.3
 
 require (
+	github.com/gorilla/mux v1.8.1
 	github.com/mattermost/mattermost/server/public v0.1.13
 	github.com/pkg/errors v0.9.1
 )

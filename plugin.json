@@ -1,0 +1,63 @@
+{
+   "id": "sx.paul.mattermost.twilio",
+   "homepage_url": "https://github.com/paul-sx/mattermost-twilio-plugin",
+   "name": "Ntfy Mattermost Server Plugin",
+   "description": "A plugin to bridge mattermost with Twilio conversations.",
+   "version": "0.1.0",
+   "min_server_version": "7.0.0",
+   "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64",
+            "linux-arm64": "server/dist/plugin-linux-arm64",
+            "darwin-amd64": "server/dist/plugin-darwin-amd64",
+            "darwin-arm64": "server/dist/plugin-darwin-arm64",
+            "windows-amd64": "server/dist/plugin-windows-amd64.exe"
+        }
+    },
+   "settings_schema": {
+      "header": "Ntfy Plugin Settings",
+      "footer": "These settings are used to configure the Ntfy plugin.",
+      "settings": [
+         {
+            "key": "server_url",
+            "display_name": "Ntfy Server URL",
+            "type": "text",
+            "help_text": "The URL of the Ntfy server to use for notifications.",
+            "placeholder": "https://ntfy.sh",
+            "default": ""
+         },
+         {
+            "key": "topic",
+            "display_name": "Ntfy Topic",
+            "type": "text",
+            "help_text": "The topic to use for notifications.",
+            "placeholder": "my-topic",
+            "default": ""
+         },
+         {
+            "key": "username",
+            "display_name": "Ntfy Username",
+            "type": "text",
+            "help_text": "The username to use for notifications.",
+            "placeholder": "my-username",
+            "default": ""
+         },
+         {
+            "key": "password",
+            "display_name": "Ntfy Password",
+            "type": "text",
+            "help_text": "The password to use for notifications.",
+            "placeholder": "",
+            "default": "",
+            "secret": true
+         },
+         {
+            "key": "active",
+            "display_name": "Enable/Disable All Notifications",
+            "type": "bool",
+            "help_text": "Enable debug logging for the plugin.",
+            "default": false
+         }
+      ]
+   }
+}

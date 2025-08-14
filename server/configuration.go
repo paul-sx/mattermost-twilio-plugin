@@ -5,13 +5,14 @@ import (
 )
 
 type configuration struct {
-	TeamName    string
-	TwilioSid   string
-	TwilioToken string
-	TeamId      string
+	TeamName      string
+	TwilioSid     string
+	TwilioToken   string
+	TeamId        string
+	InstallUserId string
 }
 
-func (p *Plugin) getConfiguration() *configuration {
+func (p *TwilioPlugin) getConfiguration() *configuration {
 	p.configurationLock.RLock()
 	defer p.configurationLock.RUnlock()
 
@@ -21,13 +22,13 @@ func (p *Plugin) getConfiguration() *configuration {
 	return p.configuration
 }
 
-func (p *Plugin) setConfiguration(configuration *configuration) {
+func (p *TwilioPlugin) setConfiguration(configuration *configuration) {
 	p.configurationLock.Lock()
 	defer p.configurationLock.Unlock()
 	p.configuration = configuration
 }
 
-func (p *Plugin) OnConfigurationChange() error {
+func (p *TwilioPlugin) OnConfigurationChange() error {
 	var configuration = new(configuration)
 
 	if err := p.API.LoadPluginConfiguration(configuration); err != nil {
