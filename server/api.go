@@ -12,10 +12,10 @@ import (
 )
 
 type webhookMessage struct {
-	AccountSid     string `json:"AccountSid"`
-	EventType      string `json:"EventType"`
-	Source         string `json:"Source"`
-	ClientIdentity string `json:"ClientIdentity"`
+	AccountSid     string  `json:"AccountSid"`
+	EventType      string  `json:"EventType"`
+	Source         string  `json:"Source"`
+	ClientIdentity *string `json:"ClientIdentity,omitempty"`
 }
 
 type webhookOnConversationAdded struct {
@@ -79,7 +79,7 @@ type webhookOnMessageAdded struct {
 	ConversationSid     string    `json:"ConversationSid"`
 	MessageSid          string    `json:"MessageSid"`
 	MessagingServiceSid string    `json:"MessagingServiceSid"`
-	Index               int       `json:"Index"`
+	Index               string    `json:"Index"`
 	DateCreated         time.Time `json:"DateCreated"`
 	Body                string    `json:"Body"`
 	Author              string    `json:"Author"`
@@ -209,7 +209,7 @@ type webhookOnUserUpdated struct {
 
 func (p *TwilioPlugin) initializeRouter() {
 	router := mux.NewRouter()
-
+	// hostname/plugins/sx.paul.mattermost.twilio/twilio/conversation
 	router.HandleFunc("/twilio/conversation", p.handleTwilioConversation).Methods("POST")
 
 	p.router = router
@@ -218,6 +218,7 @@ func (p *TwilioPlugin) initializeRouter() {
 func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.Request) {
 	var message map[string]interface{}
 	body, err := io.ReadAll(r.Body)
+	p.API.LogDebug("handleTwilioConversation", "body", string(body))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -226,6 +227,7 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	p.API.LogDebug("Message", "EventType", message["EventType"])
 
 	if eventType, ok := message["EventType"].(string); ok {
 		switch eventType {
@@ -236,6 +238,13 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 				return
 			}
 			// Handle conversation added logic here
+			// Handle message added logic here
+			_, err := p.getOrCreateConversationSettings(conversationAdded.ConversationSid)
+			if err != nil {
+				// Conversation does not have channel settings
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 
 		case "onConversationRemoved":
 			var conversationRemoved webhookOnConversationRemoved
@@ -262,9 +271,11 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 			// Handle conversation state updated logic here
 
 		case "onMessageAdded":
+			p.API.LogDebug("onMessageAdded", "body", string(body))
 			var messageAdded webhookOnMessageAdded
 			if err := json.Unmarshal(body, &messageAdded); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
 				return
 			}
 			// Handle message added logic here
@@ -272,20 +283,25 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 			if err != nil {
 				// Conversation does not have channel settings
 				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
 				return
 			}
+			p.API.LogDebug("settingscreated", "settings", settings.ChannelId)
 
-			channel, err := p.API.GetChannel(settings.ChannelId)
-			if err != nil {
+			channel, errc := p.API.GetChannel(settings.ChannelId)
+			if errc != nil {
 				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(errc.Error()))
 				return
 			}
 
 			bot, err := p.getBot()
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
 				return
 			}
+			p.API.LogDebug("bot", "bot", bot.UserId)
 
 			// Add part here to deal with attachments or media if needed
 
@@ -296,12 +312,16 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 				Props: map[string]interface{}{
 					"twilio_conversation_sid": messageAdded.ConversationSid,
 					"sent_by_twilio":          true,
+					"twilio_message_sid":      messageAdded.MessageSid,
 				},
 			}
-			if _, err := p.API.CreatePost(post); err != nil {
+			newpost, errp := p.API.CreatePost(post)
+			if errp != nil {
 				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(errp.Error()))
 				return
 			}
+			p.API.LogDebug("postcreated", "post", newpost.Id)
 
 		case "onMessageUpdated":
 			var messageUpdated webhookOnMessageUpdated
@@ -374,6 +394,7 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 }
 
 func (p *TwilioPlugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Request) {
+	p.API.LogDebug("ServeHTTP", "path", r.URL.Path)
 	if p.router != nil {
 		p.router.ServeHTTP(w, r)
 	}

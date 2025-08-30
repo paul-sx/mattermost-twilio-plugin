@@ -24,6 +24,22 @@ func (p *TwilioPlugin) getBot() (*twilioBot, error) {
 func (p *TwilioPlugin) initializeBot() (*twilioBot, error) {
 	config := p.getConfiguration()
 	UserId := config.InstallUserId
+
+	user, userErr := p.API.GetUser(UserId)
+	if userErr != nil || user == nil {
+		// Find any user with system administrator role
+		userList, listErr := p.API.GetUsers(&model.UserGetOptions{
+			Role:    "system_admin",
+			Page:    0,
+			PerPage: 1,
+		})
+		if listErr != nil || len(userList) == 0 {
+			return nil, errors.Wrap(listErr, "Could not find system admin user to own the bot")
+		}
+
+		UserId = userList[0].Id
+	}
+
 	botGetOptions := &model.BotGetOptions{
 		OwnerId:        "",
 		IncludeDeleted: false,

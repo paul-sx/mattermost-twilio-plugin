@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/pkg/errors"
@@ -46,7 +47,7 @@ func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conv
 	channel := &model.Channel{
 		TeamId:      team.Id,
 		Type:        model.ChannelTypeOpen,
-		Name:        "twilio-" + conversationSid,
+		Name:        "twilio" + strings.ToLower(conversationSid),
 		DisplayName: "Twilio Conversation " + conversationSid,
 		Props: map[string]interface{}{
 			"twilio_conversation_sid": conversationSid,
@@ -83,6 +84,14 @@ func (p *TwilioPlugin) getConversationSettings(conversationSid string) (*convers
 		return nil, errors.Wrap(err, "Could not unmarshal conversation settings")
 	}
 	return &settings, nil
+}
+
+func (p *TwilioPlugin) getOrCreateConversationSettings(conversationSid string) (*conversationSettings, error) {
+	settings, err := p.getConversationSettings(conversationSid)
+	if err != nil {
+		return p.createConversationSettings(conversationSid)
+	}
+	return settings, nil
 }
 
 func (p *TwilioPlugin) saveConversationSettings(settings *conversationSettings) error {
