@@ -14,6 +14,37 @@ type conversationSettings struct {
 	ChannelId       string `json:"channel_id"`
 }
 
+func (p *TwilioPlugin) getChannelConversationSid(channelId string) (string, error) {
+
+	page := 0
+	for {
+		keys, err := p.API.KVList(page, 50)
+		if err != nil {
+			return "", errors.Wrap(err, "Could not list KV keys")
+		}
+		if len(keys) == 0 {
+			break
+		}
+		for _, key := range keys {
+			if strings.HasPrefix(key, "twilio-by-C-") {
+				data, err := p.API.KVGet(key)
+				if err != nil {
+					continue
+				}
+				var settings conversationSettings
+				if err := json.Unmarshal(data, &settings); err != nil {
+					continue
+				}
+				if settings.ChannelId == channelId {
+					return settings.ConversationSid, nil
+				}
+			}
+		}
+		page++
+	}
+	return "", nil
+}
+
 func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conversationSettings, error) {
 	TeamId := p.getConfiguration().TeamId
 
@@ -44,11 +75,20 @@ func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conv
 		return nil, errors.Wrap(appErr, "Could not get bot")
 	}
 
+	var channel_name string
+	participants, errp := p.GetConversationParticipants(conversationSid)
+	if errp != nil {
+		channel_name = "Twilio Conversation " + conversationSid
+
+	} else {
+		channel_name = "Text " + strings.Join(participants, ", ")
+	}
+
 	channel := &model.Channel{
 		TeamId:      team.Id,
 		Type:        model.ChannelTypeOpen,
 		Name:        "twilio" + strings.ToLower(conversationSid),
-		DisplayName: "Twilio Conversation " + conversationSid,
+		DisplayName: channel_name,
 		Props: map[string]interface{}{
 			"twilio_conversation_sid": conversationSid,
 		},

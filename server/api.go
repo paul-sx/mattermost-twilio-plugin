@@ -79,7 +79,7 @@ type webhookOnMessageAdded struct {
 	ConversationSid     string    `json:"ConversationSid"`
 	MessageSid          string    `json:"MessageSid"`
 	MessagingServiceSid string    `json:"MessagingServiceSid"`
-	Index               string    `json:"Index"`
+	Index               int       `json:"Index"`
 	DateCreated         time.Time `json:"DateCreated"`
 	Body                string    `json:"Body"`
 	Author              string    `json:"Author"`
@@ -308,7 +308,7 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 			post := &model.Post{
 				UserId:    bot.UserId,
 				ChannelId: channel.Id,
-				Message:   messageAdded.Body,
+				Message:   "<" + messageAdded.Author + ">: " + messageAdded.Body,
 				Props: map[string]interface{}{
 					"twilio_conversation_sid": messageAdded.ConversationSid,
 					"sent_by_twilio":          true,
