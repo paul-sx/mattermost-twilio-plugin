@@ -46,7 +46,9 @@ func (p *TwilioPlugin) getChannelConversationSid(channelId string) (string, erro
 }
 
 func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conversationSettings, error) {
-	TeamId := p.getConfiguration().TeamId
+	configuration := p.getConfiguration()
+
+	TeamId := configuration.TeamId
 
 	team, err := p.API.GetTeam(TeamId)
 	if err != nil {
@@ -101,6 +103,14 @@ func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conv
 		return nil, errors.Wrap(cerr, "Could not create channel for conversation")
 	}
 
+	if configuration.AutoAddUsersIds != nil {
+		for _, userId := range *configuration.AutoAddUsersIds {
+			if _, err := p.API.AddUserToChannel(channel_new.Id, userId, userId); err != nil {
+				p.API.LogError("Could not add user to channel", "user_id", userId, "channel_id", channel_new.Id, "error", err.Error())
+			}
+		}
+	}
+
 	settings := &conversationSettings{
 		ConversationSid: conversationSid,
 		TeamId:          team.Id,
@@ -141,6 +151,9 @@ func (p *TwilioPlugin) saveConversationSettings(settings *conversationSettings) 
 	}
 	if err := p.API.KVSet("twilio-by-C-"+settings.ConversationSid, data); err != nil {
 		return errors.Wrap(err, "Could not save conversation settings")
+	}
+	if err := p.API.KVSet("twilio-by-Ch-"+settings.ChannelId, data); err != nil {
+		return errors.Wrap(err, "Could not save conversation settings by channel")
 	}
 	return nil
 }
