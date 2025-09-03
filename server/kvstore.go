@@ -15,34 +15,52 @@ type conversationSettings struct {
 }
 
 func (p *TwilioPlugin) getChannelConversationSid(channelId string) (string, error) {
-
-	page := 0
-	for {
-		keys, err := p.API.KVList(page, 50)
-		if err != nil {
-			return "", errors.Wrap(err, "Could not list KV keys")
-		}
-		if len(keys) == 0 {
-			break
-		}
-		for _, key := range keys {
-			if strings.HasPrefix(key, "twilio-by-C-") {
-				data, err := p.API.KVGet(key)
-				if err != nil {
-					continue
-				}
-				var settings conversationSettings
-				if err := json.Unmarshal(data, &settings); err != nil {
-					continue
-				}
-				if settings.ChannelId == channelId {
-					return settings.ConversationSid, nil
+	var settings conversationSettings
+	data, err := p.API.KVGet("twilio-by-Ch-" + channelId)
+	if err != nil {
+		//Only needed until old data is all migrated.
+		page := 0
+		for {
+			keys, err := p.API.KVList(page, 50)
+			if err != nil {
+				return "", errors.Wrap(err, "Could not list KV keys")
+			}
+			if len(keys) == 0 {
+				break
+			}
+			for _, key := range keys {
+				if strings.HasPrefix(key, "twilio-by-C-") {
+					data, err := p.API.KVGet(key)
+					if err != nil {
+						continue
+					}
+					var settings conversationSettings
+					if err := json.Unmarshal(data, &settings); err != nil {
+						continue
+					}
+					if settings.ChannelId == channelId {
+						if err := p.API.KVSet("twilio-by-Co-"+settings.ConversationSid, data); err != nil {
+							return settings.ConversationSid, errors.Wrap(err, "Could not save conversation settings")
+						}
+						if err := p.API.KVSet("twilio-by-Ch-"+settings.ChannelId, data); err != nil {
+							return settings.ConversationSid, errors.Wrap(err, "Could not save conversation settings by channel")
+						}
+						if err := p.API.KVDelete(key); err != nil {
+							return settings.ConversationSid, errors.Wrap(err, "Could not delete old conversation settings")
+						}
+						return settings.ConversationSid, nil
+					}
 				}
 			}
+			page++
 		}
-		page++
+		return "", errors.Wrap(err, "Could not find conversation")
 	}
-	return "", nil
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return "", errors.Wrap(err, "Could not unmarshal conversation settings")
+	}
+	return settings.ConversationSid, nil
+
 }
 
 func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conversationSettings, error) {
@@ -126,7 +144,7 @@ func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conv
 
 func (p *TwilioPlugin) getConversationSettings(conversationSid string) (*conversationSettings, error) {
 	var settings conversationSettings
-	data, err := p.API.KVGet("twilio-by-C-" + conversationSid)
+	data, err := p.API.KVGet("twilio-by-Co-" + conversationSid)
 	if err != nil {
 		return nil, errors.Wrap(err, "Could not find conversation")
 	}
@@ -149,7 +167,7 @@ func (p *TwilioPlugin) saveConversationSettings(settings *conversationSettings) 
 	if err != nil {
 		return errors.Wrap(err, "Could not marshal conversation settings")
 	}
-	if err := p.API.KVSet("twilio-by-C-"+settings.ConversationSid, data); err != nil {
+	if err := p.API.KVSet("twilio-by-Co-"+settings.ConversationSid, data); err != nil {
 		return errors.Wrap(err, "Could not save conversation settings")
 	}
 	if err := p.API.KVSet("twilio-by-Ch-"+settings.ChannelId, data); err != nil {
