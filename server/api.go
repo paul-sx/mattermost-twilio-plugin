@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"time"
@@ -79,7 +78,7 @@ type webhookOnMessageAdded struct {
 	ConversationSid     string    `json:"ConversationSid"`
 	MessageSid          string    `json:"MessageSid"`
 	MessagingServiceSid string    `json:"MessagingServiceSid"`
-	Index               int       `json:"Index"`
+	Index               *any      `json:"Index"`
 	DateCreated         time.Time `json:"DateCreated"`
 	Body                string    `json:"Body"`
 	Author              string    `json:"Author"`
@@ -216,178 +215,121 @@ func (p *TwilioPlugin) initializeRouter() {
 }
 
 func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.Request) {
-	var message map[string]interface{}
+
+	configuration := p.getConfiguration()
 	body, err := io.ReadAll(r.Body)
 	p.API.LogDebug("handleTwilioConversation", "body", string(body))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if err := json.Unmarshal(body, &message); err != nil {
+	if err := r.ParseForm(); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	p.API.LogDebug("Message", "EventType", message["EventType"])
 
-	if eventType, ok := message["EventType"].(string); ok {
-		switch eventType {
-		case "onConversationAdded":
-			var conversationAdded webhookOnConversationAdded
-			if err := json.Unmarshal(body, &conversationAdded); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle conversation added logic here
-			// Handle message added logic here
-			_, err := p.getOrCreateConversationSettings(conversationAdded.ConversationSid)
-			if err != nil {
-				// Conversation does not have channel settings
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
+	accountSid := r.FormValue("AccountSid")
+	if accountSid == "" || accountSid != configuration.TwilioSid {
+		p.API.LogWarn("Invalid or missing AccountSid", "provided", accountSid, "expected", configuration.TwilioSid)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
-		case "onConversationRemoved":
-			var conversationRemoved webhookOnConversationRemoved
-			if err := json.Unmarshal(body, &conversationRemoved); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle conversation removed logic here
-
-		case "onConversationUpdated":
-			var conversationUpdated webhookOnConversationUpdated
-			if err := json.Unmarshal(body, &conversationUpdated); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle conversation updated logic here
-
-		case "onConversationStateUpdated":
-			var conversationStateUpdated webhookOnConversationStateUpdated
-			if err := json.Unmarshal(body, &conversationStateUpdated); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle conversation state updated logic here
-
-		case "onMessageAdded":
-			p.API.LogDebug("onMessageAdded", "body", string(body))
-			var messageAdded webhookOnMessageAdded
-			if err := json.Unmarshal(body, &messageAdded); err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(err.Error()))
-				return
-			}
-			// Handle message added logic here
-			settings, err := p.getOrCreateConversationSettings(messageAdded.ConversationSid)
-			if err != nil {
-				// Conversation does not have channel settings
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(err.Error()))
-				return
-			}
-			p.API.LogDebug("settingscreated", "settings", settings.ChannelId)
-
-			channel, errc := p.API.GetChannel(settings.ChannelId)
-			if errc != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(errc.Error()))
-				return
-			}
-
-			bot, err := p.getBot()
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(err.Error()))
-				return
-			}
-			p.API.LogDebug("bot", "bot", bot.UserId)
-
-			// Add part here to deal with attachments or media if needed
-
-			post := &model.Post{
-				UserId:    bot.UserId,
-				ChannelId: channel.Id,
-				Message:   "<" + messageAdded.Author + ">: " + messageAdded.Body,
-				Props: map[string]interface{}{
-					"twilio_conversation_sid": messageAdded.ConversationSid,
-					"sent_by_twilio":          true,
-					"twilio_message_sid":      messageAdded.MessageSid,
-				},
-			}
-			newpost, errp := p.API.CreatePost(post)
-			if errp != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(errp.Error()))
-				return
-			}
-			p.API.LogDebug("postcreated", "post", newpost.Id)
-
-		case "onMessageUpdated":
-			var messageUpdated webhookOnMessageUpdated
-			if err := json.Unmarshal(body, &messageUpdated); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle message updated logic here
-
-		case "onMessageRemoved":
-			var messageRemoved webhookOnMessageRemoved
-			if err := json.Unmarshal(body, &messageRemoved); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle message removed logic here
-
-		case "onParticipantAdded":
-			var participantAdded webhookOnParticipantAdded
-			if err := json.Unmarshal(body, &participantAdded); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle participant added logic here
-
-		case "onParticipantRemoved":
-			var participantRemoved webhookOnParticipantRemoved
-			if err := json.Unmarshal(body, &participantRemoved); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle participant removed logic here
-
-		case "onParticipantUpdated":
-			var participantUpdated webhookOnParticipantUpdated
-			if err := json.Unmarshal(body, &participantUpdated); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle participant updated logic here
-
-		case "onDeliveryUpdated":
-			var deliveryUpdated webhookOnDeliveryUpdated
-			if err := json.Unmarshal(body, &deliveryUpdated); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle delivery updated logic here
-
-		case "onUserAdded":
-			var userAdded webhookOnUserAdded
-			if err := json.Unmarshal(body, &userAdded); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle user added logic here
-
-		case "onUserUpdated":
-			var userUpdated webhookOnUserUpdated
-			if err := json.Unmarshal(body, &userUpdated); err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			// Handle user updated logic here
-
+	p.API.LogDebug("Message", "EventType", r.FormValue("EventType"))
+	eventType := r.FormValue("EventType")
+	switch eventType {
+	case "onConversationAdded":
+		// Handle conversation added logic here
+		// Handle message added logic here
+		p.API.LogDebug("onConversationAdded", "body", string(body))
+		err := p.twilio.AddWebhookToConversation(r.FormValue("ConversationSid"))
+		if err != nil {
+			p.API.LogError("Could not add webhook to conversation", "conversation_sid", r.FormValue("ConversationSid"), "error", err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
+		_, err = p.getOrCreateConversationSettings(r.FormValue("ConversationSid"))
+		if err != nil {
+			// Conversation does not have channel settings
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+	case "onConversationRemoved":
+
+	case "onConversationUpdated":
+
+	case "onConversationStateUpdated":
+
+	case "onMessageAdded":
+		p.API.LogDebug("onMessageAdded", "body", string(body))
+
+		conversationSid := r.FormValue("ConversationSid")
+		author := r.FormValue("Author")
+		body := r.FormValue("Body")
+		messageSid := r.FormValue("MessageSid")
+
+		// Handle message added logic here
+		settings, err := p.getOrCreateConversationSettings(conversationSid)
+		if err != nil {
+			// Conversation does not have channel settings
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		p.API.LogDebug("settingscreated", "settings", settings.ChannelId)
+
+		channel, errc := p.API.GetChannel(settings.ChannelId)
+		if errc != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(errc.Error()))
+			return
+		}
+
+		bot, err := p.getBot()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+			return
+		}
+		p.API.LogDebug("bot", "bot", bot.UserId)
+
+		// Add part here to deal with attachments or media if needed
+
+		post := &model.Post{
+			UserId:    bot.UserId,
+			ChannelId: channel.Id,
+			Message:   "<" + author + ">: " + body,
+			Props: map[string]interface{}{
+				"twilio_conversation_sid": conversationSid,
+				"sent_by_twilio":          true,
+				"twilio_message_sid":      messageSid,
+			},
+		}
+		newpost, errp := p.API.CreatePost(post)
+		if errp != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(errp.Error()))
+			return
+		}
+		p.API.LogDebug("postcreated", "post", newpost.Id)
+
+	case "onMessageUpdated":
+
+	case "onMessageRemoved":
+
+	case "onParticipantAdded":
+
+	case "onParticipantRemoved":
+
+	case "onParticipantUpdated":
+
+	case "onDeliveryUpdated":
+
+	case "onUserAdded":
+
+	case "onUserUpdated":
+
 	}
 
 	w.WriteHeader(http.StatusOK)

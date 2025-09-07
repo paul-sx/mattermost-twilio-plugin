@@ -3,7 +3,7 @@
    "homepage_url": "https://github.com/paul-sx/mattermost-twilio-plugin",
    "name": "Twilio Mattermost Server Plugin",
    "description": "A plugin to bridge mattermost with Twilio conversations.",
-   "version": "0.2.2",
+   "version": "0.3.1",
    "min_server_version": "7.0.0",
    "server": {
         "executables": {
@@ -24,6 +24,14 @@
             "type": "text",
             "help_text": "The team that will have the Twilio integration.",
             "placeholder": "my-team",
+            "default": ""
+         },
+         {
+            "key": "AutoAddUsers",
+            "display_name": "Users to add to conversations",
+            "type": "text",
+            "help_text": "Comma-separated list of usernames to add to new conversations.",
+            "placeholder": "bob,ted",
             "default": ""
          },
          {

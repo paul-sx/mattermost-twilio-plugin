@@ -96,7 +96,7 @@ func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conv
 	}
 
 	var channel_name string
-	participants, errp := p.GetConversationParticipants(conversationSid)
+	participants, errp := p.twilio.GetConversationParticipants(conversationSid)
 	if errp != nil {
 		channel_name = "Twilio Conversation " + conversationSid
 

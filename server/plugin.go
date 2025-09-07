@@ -20,6 +20,7 @@ type TwilioPlugin struct {
 	configuration     *configuration
 	bot               *twilioBot
 	commandHandler    Command
+	twilio            ITwilioClient
 }
 
 func (p *TwilioPlugin) OnInstall(c *plugin.Context, event model.OnInstallEvent) error {
@@ -38,6 +39,7 @@ func (p *TwilioPlugin) OnActivate() error {
 		return err
 	}
 	p.bot = bot
+	p.twilio = NewTwilioClient(p)
 	return nil
 }
 
@@ -72,6 +74,6 @@ func (p *TwilioPlugin) MessageHasBeenPosted(c *plugin.Context, post *model.Post)
 		return
 	}
 	p.API.LogDebug("Sending message to conversation", "sid", sid, "message", post.Message)
-	p.SendMessageToConversation(sid, post.Message)
+	p.twilio.SendMessageToConversation(sid, post.Message)
 
 }

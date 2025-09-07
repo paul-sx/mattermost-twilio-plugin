@@ -60,7 +60,7 @@ func (c *Handler) executeTwilioCommand(args *model.CommandArgs, p *TwilioPlugin)
 			Text:         "This channel is not linked to a Twilio conversation.",
 		}
 	}
-	participants, err := p.GetConversationParticipants(conversationSid)
+	participants, err := p.twilio.GetConversationParticipants(conversationSid)
 	if err != nil {
 		return &model.CommandResponse{
 			ResponseType: model.CommandResponseTypeEphemeral,
