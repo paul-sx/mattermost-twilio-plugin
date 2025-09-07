@@ -14,6 +14,7 @@ type configuration struct {
 	InstallUserId   string
 	AutoAddUsers    string
 	AutoAddUsersIds *[]string
+	PhoneNumber     string
 }
 
 func (p *TwilioPlugin) getConfiguration() *configuration {

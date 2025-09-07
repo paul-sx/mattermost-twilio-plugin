@@ -52,6 +52,11 @@ func (p *TwilioPlugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs
 }
 
 func (p *TwilioPlugin) MessageHasBeenPosted(c *plugin.Context, post *model.Post) {
+
+	if post.IsJoinLeaveMessage() {
+		return
+	}
+
 	configuration := p.getConfiguration()
 
 	p.API.LogDebug("Message posted", "post", post)

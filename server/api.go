@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"net/http"
 	"time"
 
@@ -217,17 +216,17 @@ func (p *TwilioPlugin) initializeRouter() {
 func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.Request) {
 
 	configuration := p.getConfiguration()
-	body, err := io.ReadAll(r.Body)
+	/*body, err := io.ReadAll(r.Body)
 	p.API.LogDebug("handleTwilioConversation", "body", string(body))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
-	}
+	}*/
 	if err := r.ParseForm(); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-
+	p.API.LogInfo("Twilio Webhook", "form", r.Form)
 	accountSid := r.FormValue("AccountSid")
 	if accountSid == "" || accountSid != configuration.TwilioSid {
 		p.API.LogWarn("Invalid or missing AccountSid", "provided", accountSid, "expected", configuration.TwilioSid)
@@ -239,21 +238,6 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 	eventType := r.FormValue("EventType")
 	switch eventType {
 	case "onConversationAdded":
-		// Handle conversation added logic here
-		// Handle message added logic here
-		p.API.LogDebug("onConversationAdded", "body", string(body))
-		err := p.twilio.AddWebhookToConversation(r.FormValue("ConversationSid"))
-		if err != nil {
-			p.API.LogError("Could not add webhook to conversation", "conversation_sid", r.FormValue("ConversationSid"), "error", err.Error())
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_, err = p.getOrCreateConversationSettings(r.FormValue("ConversationSid"))
-		if err != nil {
-			// Conversation does not have channel settings
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
 
 	case "onConversationRemoved":
 
@@ -262,7 +246,7 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 	case "onConversationStateUpdated":
 
 	case "onMessageAdded":
-		p.API.LogDebug("onMessageAdded", "body", string(body))
+		p.API.LogDebug("onMessageAdded")
 
 		conversationSid := r.FormValue("ConversationSid")
 		author := r.FormValue("Author")

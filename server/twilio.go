@@ -7,6 +7,7 @@ import (
 
 	"github.com/twilio/twilio-go"
 	twiliov1 "github.com/twilio/twilio-go/rest/conversations/v1"
+	messaging "github.com/twilio/twilio-go/rest/messaging/v1"
 )
 
 type ITwilioClient interface {
@@ -15,8 +16,12 @@ type ITwilioClient interface {
 	AddWebhookToConversation(conversationSid string) error
 	RemoveWebhookFromConversation(conversationSid string) error
 	SetupPhoneNumber(phoneNumber string) error
+	RemovePhoneNumber(phoneNumber string) error
+	AccountNumbers() ([]messaging.MessagingV1PhoneNumber, error)
+	AccountNumbersStrings() ([]string, error)
 	GetConversationServices() ([]twiliov1.ConversationsV1Service, error)
 	CheckServiceWebhook(serviceSid string) (bool, error)
+	FindConversationsByProxyAddress(proxyAddress string) ([]twiliov1.ConversationsV1Conversation, error)
 }
 
 type TwilioClient struct {
@@ -132,14 +137,23 @@ func (tc *TwilioClient) AddWebhookToConversation(conversationSid string) error {
 		return err
 	}
 	for _, webhook := range resp {
-		if webhook.Url != nil && strings.EqualFold(*webhook.Url, tc.webhook) {
+		var url string
+		url = ""
+		if webhook.Configuration != nil {
+			if configMap, ok := (*webhook.Configuration).(map[string]interface{}); ok {
+				if u, ok := configMap["url"].(string); ok {
+					url = u
+				}
+			}
+		}
+		if strings.EqualFold(url, tc.webhook) {
 			tc.p.API.LogDebug("Webhook already exists for conversation", "conversation_sid", conversationSid, "webhook_sid", *webhook.Sid)
 			return nil
 		}
 	}
 
 	params := &twiliov1.CreateConversationScopedWebhookParams{}
-	params.SetConfigurationMethod("POST")
+	params.SetConfigurationMethod("post")
 	params.SetConfigurationUrl(tc.webhook)
 	params.SetConfigurationFilters([]string{"onMessageAdded"})
 	params.SetTarget("webhook")
@@ -161,7 +175,17 @@ func (tc *TwilioClient) RemoveWebhookFromConversation(conversationSid string) er
 		return err
 	}
 	for _, webhook := range resp {
-		if webhook.Url != nil && strings.EqualFold(*webhook.Url, tc.webhook) {
+		var url string
+		url = ""
+		if webhook.Configuration != nil {
+			if configMap, ok := (*webhook.Configuration).(map[string]interface{}); ok {
+				if u, ok := configMap["url"].(string); ok {
+					url = u
+				}
+			}
+		}
+
+		if strings.EqualFold(url, tc.webhook) {
 			// Delete the webhook
 			err = tc.client.ConversationsV1.DeleteConversationScopedWebhook(conversationSid, *webhook.Sid)
 			if err != nil {
@@ -203,19 +227,6 @@ func (tc *TwilioClient) FindConversationsByProxyAddress(proxyAddress string) ([]
 
 func (tc *TwilioClient) SetupPhoneNumber(phoneNumber string) error {
 
-	// Find conversations with the phone number as a participant
-	conversations, err := tc.FindConversationsByProxyAddress(phoneNumber)
-	if err != nil {
-		return err
-	}
-	for _, conversation := range conversations {
-		// Add webhook to conversation
-		err := tc.AddWebhookToConversation(*conversation.Sid)
-		if err != nil {
-			return err
-		}
-	}
-
 	// Update the phone number to auto create conversations and set the webhook for new conversations
 	resp, err := tc.client.ConversationsV1.FetchConfigurationAddress(phoneNumber)
 
@@ -225,29 +236,118 @@ func (tc *TwilioClient) SetupPhoneNumber(phoneNumber string) error {
 		params.SetAddress(phoneNumber)
 		params.SetAutoCreationEnabled(true)
 		params.SetAutoCreationType("webhook")
-		params.SetAutoCreationWebhookMethod("POST")
+		params.SetAutoCreationWebhookMethod("post")
 		params.SetAutoCreationWebhookUrl(tc.webhook)
-		params.SetAutoCreationWebhookFilters([]string{"onConversationAdded", "onMessageAdded"})
+		params.SetAutoCreationWebhookFilters([]string{"onMessageAdded"})
 		respc, errc := tc.client.ConversationsV1.CreateConfigurationAddress(params)
 		if errc != nil {
 			tc.p.API.LogError("Error creating phone number configuration", "phone_number", phoneNumber, "error", errc.Error())
 			return errc
 		}
 		tc.p.API.LogDebug("Created phone number configuration", "phone_number", phoneNumber, "sid", *respc.Sid)
+
+	} else {
+		params := &twiliov1.UpdateConfigurationAddressParams{}
+		params.SetAutoCreationEnabled(true)
+		params.SetAutoCreationType("webhook")
+		params.SetAutoCreationWebhookMethod("post")
+		params.SetAutoCreationWebhookUrl(tc.webhook)
+		params.SetAutoCreationWebhookFilters([]string{"onMessageAdded"})
+		_, err = tc.client.ConversationsV1.UpdateConfigurationAddress(*resp.Sid, params)
+		if err != nil {
+			tc.p.API.LogError("Error updating phone number configuration", "phone_number", phoneNumber, "error", err.Error())
+			return err
+		}
+		tc.p.API.LogDebug("Updated phone number configuration", "phone_number", phoneNumber)
+	}
+
+	// Find conversations with the phone number as a participant
+	tc.p.API.LogDebug("Setting up phone number:", phoneNumber)
+	conversations, err := tc.FindConversationsByProxyAddress(phoneNumber)
+	if err != nil {
+		return err
+	}
+	for _, conversation := range conversations {
+		// Add webhook to conversation
+		tc.p.API.LogDebug("Adding webhook to conversation:", "conversation", *conversation.Sid)
+		err := tc.AddWebhookToConversation(*conversation.Sid)
+		if err != nil {
+			tc.p.API.LogError("Error adding webhook to conversation:", *conversation.Sid, "error:", err.Error())
+			return err
+		}
+	}
+	return nil
+
+}
+
+func (tc *TwilioClient) RemovePhoneNumber(phoneNumber string) error {
+
+	// Find conversations with the phone number as a participant
+	tc.p.API.LogDebug("Removing phone number:", "number", phoneNumber)
+	conversations, err := tc.FindConversationsByProxyAddress(phoneNumber)
+	if err != nil {
+		return err
+	}
+	for _, conversation := range conversations {
+		// Add webhook to conversation
+		tc.p.API.LogDebug("Removing webhook to conversation:", "sid", *conversation.Sid)
+		err := tc.RemoveWebhookFromConversation(*conversation.Sid)
+		if err != nil {
+			return err
+		}
+	}
+	tc.p.API.LogDebug("Fetching configuration for phone number:", "number", phoneNumber)
+	// Update the phone number to auto create conversations and set the webhook for new conversations
+	resp, err := tc.client.ConversationsV1.FetchConfigurationAddress(phoneNumber)
+
+	if err != nil || resp == nil || resp.Sid == nil {
+
+		tc.p.API.LogDebug("Configuration does not already exist", "phone_number", phoneNumber)
 		return nil
 	}
 
-	params := &twiliov1.UpdateConfigurationAddressParams{}
-	params.SetAutoCreationEnabled(true)
-	params.SetAutoCreationType("webhook")
-	params.SetAutoCreationWebhookMethod("POST")
-	params.SetAutoCreationWebhookUrl(tc.webhook)
-	params.SetAutoCreationWebhookFilters([]string{"onConversationAdded", "onMessageAdded"})
-	_, err = tc.client.ConversationsV1.UpdateConfigurationAddress(*resp.Sid, params)
+	err = tc.client.ConversationsV1.DeleteConfigurationAddress(*resp.Sid)
 	if err != nil {
-		tc.p.API.LogError("Error updating phone number configuration", "phone_number", phoneNumber, "error", err.Error())
+		tc.p.API.LogError("Error deleting phone number configuration", "phone_number", phoneNumber, "error", err.Error())
 		return err
 	}
-	tc.p.API.LogDebug("Updated phone number configuration", "phone_number", phoneNumber)
+	tc.p.API.LogDebug("Deleted phone number configuration", "phone_number", phoneNumber)
 	return nil
+}
+
+func (tc *TwilioClient) AccountNumbers() ([]messaging.MessagingV1PhoneNumber, error) {
+
+	var numbers []messaging.MessagingV1PhoneNumber
+	params := &messaging.ListServiceParams{}
+	resp, err := tc.client.MessagingV1.ListService(params)
+	if err != nil {
+		tc.p.API.LogError("Error getting messaging services", "error", err.Error())
+		return nil, err
+	}
+	for _, service := range resp {
+
+		mparams := &messaging.ListPhoneNumberParams{}
+		r, errr := tc.client.MessagingV1.ListPhoneNumber(*service.Sid, mparams)
+		if errr != nil {
+			tc.p.API.LogError("Error getting phone numbers for service", "service_sid", *service.Sid, "error", errr.Error())
+			return nil, errr
+		}
+		numbers = append(numbers, r...)
+
+	}
+	return numbers, nil
+}
+
+func (tc *TwilioClient) AccountNumbersStrings() ([]string, error) {
+	var numbers []string
+	nums, err := tc.AccountNumbers()
+	if err != nil {
+		return nil, err
+	}
+	for _, number := range nums {
+		if number.PhoneNumber != nil {
+			numbers = append(numbers, *number.PhoneNumber)
+		}
+	}
+	return numbers, nil
 }
