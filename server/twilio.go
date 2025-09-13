@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/twilio/twilio-go"
 	twiliov1 "github.com/twilio/twilio-go/rest/conversations/v1"
 	messaging "github.com/twilio/twilio-go/rest/messaging/v1"
@@ -22,12 +25,35 @@ type ITwilioClient interface {
 	GetConversationServices() ([]twiliov1.ConversationsV1Service, error)
 	CheckServiceWebhook(serviceSid string) (bool, error)
 	FindConversationsByProxyAddress(proxyAddress string) ([]twiliov1.ConversationsV1Conversation, error)
+	DownloadMedia(ChatServiceSid string, mediaSid string) ([]byte, error)
 }
 
 type TwilioClient struct {
 	p       *TwilioPlugin
 	client  *twilio.RestClient
 	webhook string
+}
+
+func (tc *TwilioClient) DownloadMedia(ChatServiceSid string, mediaSid string) ([]byte, error) {
+	req, err := http.NewRequest("GET", "https://mcs.us1.twilio.com/v1/Services/"+ChatServiceSid+"/Media/"+mediaSid+"/Content", nil)
+	if err != nil {
+		return nil, err
+	}
+	config := tc.p.getConfiguration()
+	req.SetBasicAuth(config.TwilioSid, config.TwilioToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, errors.New("failed to download media, status code: " + resp.Status)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 func NewTwilioClient(p *TwilioPlugin) ITwilioClient {

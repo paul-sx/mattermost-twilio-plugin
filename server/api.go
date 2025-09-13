@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -252,6 +253,7 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 		author := r.FormValue("Author")
 		body := r.FormValue("Body")
 		messageSid := r.FormValue("MessageSid")
+		ChatServiceSid := r.FormValue("ChatServiceSid")
 
 		// Handle message added logic here
 		settings, err := p.getOrCreateConversationSettings(conversationSid)
@@ -297,6 +299,37 @@ func (p *TwilioPlugin) handleTwilioConversation(w http.ResponseWriter, r *http.R
 			return
 		}
 		p.API.LogDebug("postcreated", "post", newpost.Id)
+
+		if media := r.FormValue("Media"); media != "" {
+			p.API.LogDebug("media", "media", media)
+			var items []map[string]interface{}
+			if err = json.Unmarshal([]byte(media), &items); err != nil {
+				p.API.LogError("Could not unmarshal media", "error", err.Error())
+				return
+			}
+			for _, item := range items {
+				if sid, ok := item["Sid"].(string); ok {
+					if Filename, ok := item["Filename"].(string); ok {
+						resp, err := p.twilio.DownloadMedia(ChatServiceSid, sid)
+						if err != nil {
+							p.API.LogError("Could not download media", "error", err.Error())
+							return
+						}
+						file, ferr := p.API.UploadFile(resp, channel.Id, Filename)
+						if ferr != nil {
+							p.API.LogError("Could not upload media", "error", ferr.Error())
+							return
+						}
+						newpost.FileIds = append(newpost.FileIds, file.Id)
+						if _, err := p.API.UpdatePost(newpost); err != nil {
+							p.API.LogError("Could not update post with media", "error", err.Error())
+							return
+						}
+					}
+				}
+			}
+
+		}
 
 	case "onMessageUpdated":
 
