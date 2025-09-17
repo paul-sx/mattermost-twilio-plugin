@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/pkg/errors"
 	"github.com/twilio/twilio-go"
 	twiliov1 "github.com/twilio/twilio-go/rest/conversations/v1"
@@ -15,7 +17,9 @@ import (
 
 type ITwilioClient interface {
 	GetConversationParticipants(conversationSid string) ([]string, error)
+	GetConversation(conversationSid string) (*twiliov1.ConversationsV1Conversation, error)
 	SendMessageToConversation(conversationSid, message string) error
+	SendMediaToConversation(conversationSid string, media *model.FileInfo, mediadata []byte) error
 	AddWebhookToConversation(conversationSid string) error
 	RemoveWebhookFromConversation(conversationSid string) error
 	SetupPhoneNumber(phoneNumber string) error
@@ -70,6 +74,18 @@ func NewTwilioClient(p *TwilioPlugin) ITwilioClient {
 	}
 }
 
+func (tc *TwilioClient) GetConversation(conversationSid string) (*twiliov1.ConversationsV1Conversation, error) {
+
+	tc.p.API.LogDebug("Getting conversation", "sid", conversationSid)
+
+	resp, err := tc.client.ConversationsV1.FetchConversation(conversationSid)
+	if err != nil {
+		tc.p.API.LogError("Error getting conversation", "sid", conversationSid, "error", err.Error())
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (tc *TwilioClient) GetConversationParticipants(conversationSid string) ([]string, error) {
 
 	tc.p.API.LogDebug("Getting participants for conversation", "sid", conversationSid)
@@ -112,7 +128,7 @@ func (tc *TwilioClient) GetConversationParticipants(conversationSid string) ([]s
 	return participants, nil
 }
 
-func (tc *TwilioClient) SendMessageToConversation(conversationSid, message string) error {
+func (tc *TwilioClient) SendMessageToConversation(conversationSid string, message string) error {
 	tc.p.API.LogDebug("Sending message to conversation", "sid", conversationSid, "message", message)
 
 	params := &twiliov1.CreateConversationMessageParams{Body: &message}
@@ -121,6 +137,66 @@ func (tc *TwilioClient) SendMessageToConversation(conversationSid, message strin
 		tc.p.API.LogError("Error sending message to conversation", "sid", conversationSid, "message", message, "error", err.Error())
 	}
 	return err
+}
+
+func (tc *TwilioClient) SendMediaToConversation(conversationSid string, media *model.FileInfo, mediadata []byte) error {
+	settings, err := tc.p.getConversationSettings(conversationSid)
+	if err != nil {
+		tc.p.API.LogError("Could not get conversation settings", "sid", conversationSid, "error", err.Error())
+		return err
+	}
+	if settings.ChatServiceSid == nil {
+		tc.p.API.LogError("Conversation does not have a chat service sid", "sid", conversationSid)
+		return errors.New("conversation does not have a chat service sid")
+	}
+
+	tc.p.API.LogDebug("Sending media to conversation", "sid", conversationSid, "media", media.Name)
+
+	// Upload the media to Twilio Media Content Service
+	req, err := http.NewRequest("POST", "https://mcs.us1.twilio.com/v1/Services/"+*settings.ChatServiceSid+"/Media", strings.NewReader(string(mediadata)))
+	if err != nil {
+		tc.p.API.LogError("Error creating request to upload media", "error", err.Error())
+		return err
+	}
+	config := tc.p.getConfiguration()
+	req.SetBasicAuth(config.TwilioSid, config.TwilioToken)
+	req.Header.Set("Content-Type", media.MimeType)
+	req.Header.Set("Content-Length", strconv.Itoa(len(mediadata)))
+	req.Header.Set("X-Twilio-File-Name", media.Name)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		tc.p.API.LogError("Error uploading media to Twilio", "error", err.Error())
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		tc.p.API.LogError("Error uploading media to Twilio, non-2xx response", "status", resp.StatusCode, "body", string(body))
+		return errors.New("failed to upload media to Twilio, status code: " + resp.Status)
+	}
+	var uploadResp struct {
+		Sid string `json:"sid"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&uploadResp); err != nil {
+		tc.p.API.LogError("Error decoding upload media response", "error", err.Error())
+		return err
+	}
+	if uploadResp.Sid == "" {
+		tc.p.API.LogError("Upload media response did not contain a sid")
+		return errors.New("upload media response did not contain a sid")
+	}
+
+	// Send the media message to the conversation
+	//mediaUrl := "https://mcs.us1.twilio.com/v1/Services/" + *settings.ChatServiceSid + "/Media/" + uploadResp.Sid
+	params := &twiliov1.CreateConversationMessageParams{}
+	params.SetMediaSid(uploadResp.Sid)
+
+	_, err = tc.client.ConversationsV1.CreateConversationMessage(conversationSid, params)
+	if err != nil {
+		tc.p.API.LogError("Error sending media message to conversation", "sid", conversationSid, "media_sid", uploadResp.Sid, "error", err.Error())
+	}
+	return nil
 }
 
 func (tc *TwilioClient) GetConversationServices() ([]twiliov1.ConversationsV1Service, error) {

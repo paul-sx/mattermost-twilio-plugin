@@ -53,7 +53,7 @@ func (p *TwilioPlugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs
 
 func (p *TwilioPlugin) MessageHasBeenPosted(c *plugin.Context, post *model.Post) {
 
-	if post.IsJoinLeaveMessage() {
+	if post.IsJoinLeaveMessage() || post.IsSystemMessage() {
 		return
 	}
 
@@ -80,5 +80,22 @@ func (p *TwilioPlugin) MessageHasBeenPosted(c *plugin.Context, post *model.Post)
 	}
 	p.API.LogDebug("Sending message to conversation", "sid", sid, "message", post.Message)
 	p.twilio.SendMessageToConversation(sid, post.Message)
+
+	if len(post.FileIds) > 0 {
+		for _, fileId := range post.FileIds {
+			fileInfo, err := p.API.GetFileInfo(fileId)
+			if err != nil {
+				p.API.LogError("Failed to get file info", "fileId", fileId, "error", err.Error())
+				continue
+			}
+			filedata, err := p.API.GetFile(fileId)
+			if err != nil {
+				p.API.LogError("Failed to get file data", "fileId", fileId, "error", err.Error())
+				continue
+			}
+			p.API.LogDebug("Sending media to conversation", "sid", sid, "fileName", fileInfo.Name)
+			p.twilio.SendMediaToConversation(sid, fileInfo, filedata)
+		}
+	}
 
 }

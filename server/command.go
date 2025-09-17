@@ -21,10 +21,10 @@ func NewCommandHandler(client *pluginapi.Client) Command {
 	err := client.SlashCommand.Register(&model.Command{
 		Trigger:          "twilio",
 		DisplayName:      "Twilio",
-		Description:      "Turn ntfy notifications on or off for a channel or set the topic",
+		Description:      "Check to see the twilio conversation linked to this channel",
 		AutoComplete:     true,
-		AutoCompleteDesc: "Turn ntfy notifications on or off for a channel or set the topic",
-		AutoCompleteHint: "on|off|topic [topic]|delay [seconds]",
+		AutoCompleteDesc: "Check Twilio conversation info",
+		AutoCompleteHint: "[none]",
 		IconURL:          "https://ntfy.sh/static/images/favicon.ico",
 	})
 	if err != nil {

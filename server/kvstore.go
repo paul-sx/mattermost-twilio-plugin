@@ -9,9 +9,10 @@ import (
 )
 
 type conversationSettings struct {
-	ConversationSid string `json:"conversation_sid"`
-	TeamId          string `json:"team_id"`
-	ChannelId       string `json:"channel_id"`
+	ConversationSid string  `json:"conversation_sid"`
+	TeamId          string  `json:"team_id"`
+	ChannelId       string  `json:"channel_id"`
+	ChatServiceSid  *string `json:"chat_service_sid,omitempty"`
 }
 
 func (p *TwilioPlugin) getChannelConversationSid(channelId string) (string, error) {
@@ -72,23 +73,6 @@ func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conv
 	if err != nil {
 		return nil, errors.Wrapf(err, "Could not find team with ID %s", TeamId)
 	}
-	var page = 0
-	for channels, err := p.API.GetPublicChannelsForTeam(team.Id, page, 100); err == nil && len(channels) > 0; channels, err = p.API.GetPublicChannelsForTeam(team.Id, page, 100) {
-		page++
-		for _, channel := range channels {
-			if channel.Props["twilio_conversation_sid"] == conversationSid {
-				settings := &conversationSettings{
-					ConversationSid: conversationSid,
-					TeamId:          team.Id,
-					ChannelId:       channel.Id,
-				}
-				if err := p.saveConversationSettings(settings); err != nil {
-					return nil, errors.Wrap(err, "Could not save conversation settings")
-				}
-				return settings, nil
-			}
-		}
-	}
 
 	bot, appErr := p.getBot()
 	if appErr != nil {
@@ -129,10 +113,21 @@ func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conv
 		}
 	}
 
+	conv, errc := p.twilio.GetConversation(conversationSid)
+	if errc != nil {
+		return nil, errors.Wrap(errc, "Could not get conversation details")
+	}
+
+	var chatServiceSid *string
+	if conv.ChatServiceSid != nil {
+		chatServiceSid = conv.ChatServiceSid
+	}
+
 	settings := &conversationSettings{
 		ConversationSid: conversationSid,
 		TeamId:          team.Id,
 		ChannelId:       channel_new.Id,
+		ChatServiceSid:  chatServiceSid,
 	}
 
 	if err := p.saveConversationSettings(settings); err != nil {
@@ -150,6 +145,18 @@ func (p *TwilioPlugin) getConversationSettings(conversationSid string) (*convers
 	}
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil, errors.Wrap(err, "Could not unmarshal conversation settings")
+	}
+	if settings.ChatServiceSid == nil {
+		conv, errc := p.twilio.GetConversation(conversationSid)
+		if errc != nil {
+			return nil, errors.Wrap(errc, "Could not get conversation details")
+		}
+		if conv.ChatServiceSid != nil {
+			settings.ChatServiceSid = conv.ChatServiceSid
+			if err := p.saveConversationSettings(&settings); err != nil {
+				return nil, errors.Wrap(err, "Could not save updated conversation settings")
+			}
+		}
 	}
 	return &settings, nil
 }
