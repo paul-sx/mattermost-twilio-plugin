@@ -20,6 +20,7 @@ type ITwilioClient interface {
 	GetConversation(conversationSid string) (*twiliov1.ConversationsV1Conversation, error)
 	SendMessageToConversation(conversationSid, message string) error
 	SendMediaToConversation(conversationSid string, media *model.FileInfo, mediadata []byte) error
+	ListConversationWebhooks(conversationSid string) ([]twiliov1.ConversationsV1ConversationScopedWebhook, error)
 	AddWebhookToConversation(conversationSid string) error
 	RemoveWebhookFromConversation(conversationSid string) error
 	SetupPhoneNumber(phoneNumber string) error
@@ -30,6 +31,7 @@ type ITwilioClient interface {
 	CheckServiceWebhook(serviceSid string) (bool, error)
 	FindConversationsByProxyAddress(proxyAddress string) ([]twiliov1.ConversationsV1Conversation, error)
 	DownloadMedia(ChatServiceSid string, mediaSid string) ([]byte, error)
+	ListConversations() ([]twiliov1.ConversationsV1Conversation, error)
 }
 
 type TwilioClient struct {
@@ -231,6 +233,19 @@ func (tc *TwilioClient) CheckServiceWebhook(serviceSid string) (bool, error) {
  4. Sets the plugin webhook to receive new conversations
 */
 
+func (tc *TwilioClient) ListConversationWebhooks(conversationSid string) ([]twiliov1.ConversationsV1ConversationScopedWebhook, error) {
+
+	var webhooks []twiliov1.ConversationsV1ConversationScopedWebhook
+	params := &twiliov1.ListConversationScopedWebhookParams{}
+	resp, err := tc.client.ConversationsV1.ListConversationScopedWebhook(conversationSid, params)
+	if err != nil {
+		tc.p.API.LogError("Error getting conversation webhooks", "conversation_sid", conversationSid, "error", err.Error())
+		return nil, err
+	}
+	webhooks = append(webhooks, resp...)
+	return webhooks, nil
+}
+
 func (tc *TwilioClient) AddWebhookToConversation(conversationSid string) error {
 
 	resp, err := tc.client.ConversationsV1.ListConversationScopedWebhook(conversationSid, &twiliov1.ListConversationScopedWebhookParams{})
@@ -298,6 +313,18 @@ func (tc *TwilioClient) RemoveWebhookFromConversation(conversationSid string) er
 		}
 	}
 	return nil
+}
+
+func (tc *TwilioClient) ListConversations() ([]twiliov1.ConversationsV1Conversation, error) {
+	var conversations []twiliov1.ConversationsV1Conversation
+	params := &twiliov1.ListConversationParams{}
+	resp, err := tc.client.ConversationsV1.ListConversation(params)
+	if err != nil {
+		tc.p.API.LogError("Error getting conversations", "error", err.Error())
+		return nil, err
+	}
+	conversations = append(conversations, resp...)
+	return conversations, nil
 }
 
 func (tc *TwilioClient) FindConversationsByProxyAddress(proxyAddress string) ([]twiliov1.ConversationsV1Conversation, error) {
