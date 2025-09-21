@@ -481,7 +481,7 @@ func (c *Handler) executeConversationCommand(args *model.CommandArgs, p *TwilioP
 						}
 					}
 				}
-				text += fmt.Sprintf("- SID: %s, URL: %s, Events: %s\n", wh.Sid, url, strings.Join(eventsStr, ", "))
+				text += fmt.Sprintf("- SID: %s, URL: %s, Events: %s\n", *wh.Sid, url, strings.Join(eventsStr, ", "))
 			}
 			return &model.CommandResponse{
 				ResponseType: model.CommandResponseTypeEphemeral,
@@ -604,17 +604,12 @@ func (c *Handler) executeNumberCommand(args *model.CommandArgs, p *TwilioPlugin,
 					Text:         fmt.Sprintf("Phone number %s is not associated with your Twilio account.", phoneNumber),
 				}
 			}
-			err := p.twilio.SetupPhoneNumber(phoneNumber)
-			if err != nil {
-				return &model.CommandResponse{
-					ResponseType: model.CommandResponseTypeEphemeral,
-					Text:         fmt.Sprintf("Could not set up webhook for phone number %s.", phoneNumber),
-				}
-			}
+			go p.twilio.SetupPhoneNumberAsync(phoneNumber, args)
 			return &model.CommandResponse{
 				ResponseType: model.CommandResponseTypeEphemeral,
-				Text:         fmt.Sprintf("Webhook set up for phone number %s.", phoneNumber),
+				Text:         fmt.Sprintf("Setting up webhook for phone number %s. This may take a few seconds.", phoneNumber),
 			}
+
 		case "remove":
 			if len(fields) < 3 {
 				return &model.CommandResponse{

@@ -3,7 +3,7 @@
    "homepage_url": "https://github.com/paul-sx/mattermost-twilio-plugin",
    "name": "Twilio Mattermost Server Plugin",
    "description": "A plugin to bridge mattermost with Twilio conversations.",
-   "version": "0.7.1",
+   "version": "0.7.2",
    "min_server_version": "7.0.0",
    "server": {
         "executables": {

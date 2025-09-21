@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/pkg/errors"
@@ -24,6 +25,7 @@ type ITwilioClient interface {
 	AddWebhookToConversation(conversationSid string) error
 	RemoveWebhookFromConversation(conversationSid string) error
 	SetupPhoneNumber(phoneNumber string) error
+	SetupPhoneNumberAsync(phoneNumber string, args *model.CommandArgs)
 	RemovePhoneNumber(phoneNumber string) error
 	AccountNumbers() ([]messaging.MessagingV1PhoneNumber, error)
 	AccountNumbersStrings() ([]string, error)
@@ -336,22 +338,130 @@ func (tc *TwilioClient) FindConversationsByProxyAddress(proxyAddress string) ([]
 		tc.p.API.LogError("Error getting conversations", "error", err.Error())
 		return nil, err
 	}
+	var wg sync.WaitGroup
+	guard := make(chan struct{}, 5) // limit to 5 concurrent requests
 	for _, conversation := range resp {
-		// Check if the conversation has a participant with the proxy address
-		participants, err := tc.GetConversationParticipants(*conversation.Sid)
-		if err != nil {
-			tc.p.API.LogError("Error getting participants for conversation", "sid", *conversation.Sid, "error", err.Error())
-			continue
-		}
-		for _, participant := range participants {
-			if strings.EqualFold(participant, "*"+proxyAddress) {
-				conversations = append(conversations, conversation)
-				break
+		wg.Add(1)
+		guard <- struct{}{}
+		go func(conv twiliov1.ConversationsV1Conversation) {
+			defer func() {
+				<-guard
+				wg.Done()
+			}()
+
+			// Check if the conversation has a participant with the proxy address
+			participants, err := tc.GetConversationParticipants(*conv.Sid)
+			if err != nil {
+				tc.p.API.LogError("Error getting participants for conversation", "sid", *conv.Sid, "error", err.Error())
+				return
 			}
-		}
+			for _, participant := range participants {
+				if strings.EqualFold(participant, "*"+proxyAddress) {
+					conversations = append(conversations, conv)
+					break
+				}
+			}
+		}(conversation)
 	}
+	wg.Wait()
 
 	return conversations, nil
+}
+
+func (tc *TwilioClient) SetupPhoneNumberAsync(phoneNumber string, args *model.CommandArgs) {
+	// Update the phone number to auto create conversations and set the webhook for new conversations
+	resp, err := tc.client.ConversationsV1.FetchConfigurationAddress(phoneNumber)
+
+	if err != nil || resp == nil || resp.Sid == nil {
+		params := &twiliov1.CreateConfigurationAddressParams{}
+		params.SetType("sms")
+		params.SetAddress(phoneNumber)
+		params.SetAutoCreationEnabled(true)
+		params.SetAutoCreationType("webhook")
+		params.SetAutoCreationWebhookMethod("post")
+		params.SetAutoCreationWebhookUrl(tc.webhook)
+		params.SetAutoCreationWebhookFilters([]string{"onMessageAdded"})
+		respc, errc := tc.client.ConversationsV1.CreateConfigurationAddress(params)
+		if errc != nil {
+
+			post := &model.Post{
+				UserId:    tc.p.bot.UserId,
+				ChannelId: args.ChannelId,
+				Message:   "Error setting up phone number " + phoneNumber + ": " + errc.Error(),
+				Type:      model.PostTypeEphemeral,
+			}
+			if _, err := tc.p.API.CreatePost(post); err != nil {
+				tc.p.API.LogError("Could not create post for error", "error", err.Error())
+			}
+			return
+		}
+		tc.p.API.LogDebug("Created phone number configuration", "phone_number", phoneNumber, "sid", *respc.Sid)
+
+	} else {
+		params := &twiliov1.UpdateConfigurationAddressParams{}
+		params.SetAutoCreationEnabled(true)
+		params.SetAutoCreationType("webhook")
+		params.SetAutoCreationWebhookMethod("post")
+		params.SetAutoCreationWebhookUrl(tc.webhook)
+		params.SetAutoCreationWebhookFilters([]string{"onMessageAdded"})
+		_, err = tc.client.ConversationsV1.UpdateConfigurationAddress(*resp.Sid, params)
+		if err != nil {
+			post := &model.Post{
+				UserId:    tc.p.bot.UserId,
+				ChannelId: args.ChannelId,
+				Message:   "Error setting up phone number " + phoneNumber + ": " + err.Error(),
+				Type:      model.PostTypeEphemeral,
+			}
+			if _, err := tc.p.API.CreatePost(post); err != nil {
+				tc.p.API.LogError("Could not create post for error", "error", err.Error())
+			}
+			return
+		}
+		tc.p.API.LogDebug("Updated phone number configuration", "phone_number", phoneNumber)
+	}
+
+	// Find conversations with the phone number as a participant
+	tc.p.API.LogDebug("Setting up phone number:", phoneNumber)
+	conversations, err := tc.FindConversationsByProxyAddress(phoneNumber)
+	if err != nil {
+		post := &model.Post{
+			UserId:    tc.p.bot.UserId,
+			ChannelId: args.ChannelId,
+			Message:   "Error setting up phone number " + phoneNumber + ": " + err.Error(),
+			Type:      model.PostTypeEphemeral,
+		}
+		if _, err := tc.p.API.CreatePost(post); err != nil {
+			tc.p.API.LogError("Could not create post for error", "error", err.Error())
+		}
+		return
+	}
+	for _, conversation := range conversations {
+		// Add webhook to conversation
+		tc.p.API.LogDebug("Adding webhook to conversation:", "conversation", *conversation.Sid)
+		err := tc.AddWebhookToConversation(*conversation.Sid)
+		if err != nil {
+			tc.p.API.LogError("Error adding webhook to conversation:", *conversation.Sid, "error:", err.Error())
+			post := &model.Post{
+				UserId:    tc.p.bot.UserId,
+				ChannelId: args.ChannelId,
+				Message:   "Error setting up phone number " + phoneNumber + ": " + err.Error(),
+				Type:      model.PostTypeEphemeral,
+			}
+			if _, err := tc.p.API.CreatePost(post); err != nil {
+				tc.p.API.LogError("Could not create post for error", "error", err.Error())
+			}
+			return
+		}
+	}
+	post := &model.Post{
+		UserId:    tc.p.bot.UserId,
+		ChannelId: args.ChannelId,
+		Message:   "Successfully set up phone number " + phoneNumber,
+		Type:      model.PostTypeEphemeral,
+	}
+	if _, err := tc.p.API.CreatePost(post); err != nil {
+		tc.p.API.LogError("Could not create post for error", "error", err.Error())
+	}
 }
 
 func (tc *TwilioClient) SetupPhoneNumber(phoneNumber string) error {
