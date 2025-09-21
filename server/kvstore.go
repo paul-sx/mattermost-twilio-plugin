@@ -13,6 +13,8 @@ type conversationSettings struct {
 	TeamId          string  `json:"team_id"`
 	ChannelId       string  `json:"channel_id"`
 	ChatServiceSid  *string `json:"chat_service_sid,omitempty"`
+	Type            string  `json:"type,omitempty"`
+	RootPostId      string  `json:"root_post_id,omitempty"`
 }
 
 func (p *TwilioPlugin) getChannelConversationSettings(channelId string) (*conversationSettings, error) {
@@ -35,6 +37,20 @@ func (p *TwilioPlugin) getChannelConversationSid(channelId string) (string, erro
 		return "", err
 	}
 	return settings.ConversationSid, nil
+}
+
+func (p *TwilioPlugin) getPostConversationSettings(postId string) (*conversationSettings, error) {
+
+	var settings *conversationSettings
+	data, err := p.API.KVGet("twilio-by-Po-" + postId)
+	if err != nil {
+		return nil, errors.Wrap(err, "Could not find conversation")
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return nil, errors.Wrap(err, "Could not unmarshal conversation settings")
+	}
+	return settings, nil
+
 }
 
 func (p *TwilioPlugin) createConversationSettings(conversationSid string) (*conversationSettings, error) {
@@ -131,6 +147,9 @@ func (p *TwilioPlugin) getConversationSettings(conversationSid string) (*convers
 			}
 		}
 	}
+	if settings.Type == "" {
+		settings.Type = "channel"
+	}
 	return &settings, nil
 }
 
@@ -150,8 +169,24 @@ func (p *TwilioPlugin) saveConversationSettings(settings *conversationSettings) 
 	if err := p.API.KVSet("twilio-by-Co-"+settings.ConversationSid, data); err != nil {
 		return errors.Wrap(err, "Could not save conversation settings")
 	}
-	if err := p.API.KVSet("twilio-by-Ch-"+settings.ChannelId, data); err != nil {
-		return errors.Wrap(err, "Could not save conversation settings by channel")
+	if settings.Type == "post" && settings.RootPostId != "" {
+		if err := p.API.KVSet("twilio-by-Po-"+settings.RootPostId, data); err != nil {
+			return errors.Wrap(err, "Could not save conversation settings by post")
+		}
+	} else {
+		if err := p.API.KVSet("twilio-by-Ch-"+settings.ChannelId, data); err != nil {
+			return errors.Wrap(err, "Could not save conversation settings by channel")
+		}
 	}
 	return nil
+}
+
+func (p *TwilioPlugin) deleteConversationSettings(settings *conversationSettings) {
+	p.API.KVDelete("twilio-by-Co-" + settings.ConversationSid)
+	if settings.ChannelId != "" {
+		p.API.KVDelete("twilio-by-Ch-" + settings.ChannelId)
+	}
+	if settings.RootPostId != "" {
+		p.API.KVDelete("twilio-by-Po-" + settings.RootPostId)
+	}
 }

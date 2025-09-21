@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
+	openapi "github.com/twilio/twilio-go/rest/conversations/v1"
 )
 
 type Handler struct {
@@ -217,24 +219,24 @@ func (c *Handler) executeTwilioCommand(args *model.CommandArgs, p *TwilioPlugin)
 	case "number":
 		return c.executeNumberCommand(args, p, fields[2:])
 	case "help":
-		text := `Command structure
-	channel:
-		status: shows conversation linked to this channel and participants
-		connect <conversation_sid>: links this channel to the given conversation
-		disconnect: unlinks this channel from any conversation
-	conversation:
-		list [page]: lists conversations and participants (page size 20)
-		participants <conversation_sid>: lists participants in the given conversation
-		webhooks:
-			list <conversation_sid>: lists webhooks for the given conversation
-			add <conversation_sid>: adds a webhook to the given conversation
-			remove <conversation_sid>: removes the given webhook from the given conversation
-	number:
-		list: lists phone numbers associated with the Twilio account
-		webhooks:
-			setup <phone_number>: sets up a webhook for the given phone number
-			remove <phone_number>: removes the webhook for the given phone number
-	help: shows this message`
+		text := `**Command structure**
+	**channel:**
+		**status:** shows conversation linked to this channel and participants
+		**connect <conversation_sid>:** links this channel to the given conversation
+		**disconnect:** unlinks this channel from any conversation
+	**conversation:**
+		**list [page]:** lists conversations and participants (page size 20)
+		**participants <conversation_sid>:** lists participants in the given conversation
+		**webhooks:**
+			**list <conversation_sid>:** lists webhooks for the given conversation
+			**add <conversation_sid>:** adds a webhook to the given conversation
+			**remove <conversation_sid>:** removes the given webhook from the given conversation
+	**number:**
+		**list:** lists phone numbers associated with the Twilio account
+		**webhooks:**
+			**setup <phone_number>:** sets up a webhook for the given phone number
+			**remove <phone_number>:** removes the webhook for the given phone number
+	**help:** shows this message`
 		return &model.CommandResponse{
 			ResponseType: model.CommandResponseTypeEphemeral,
 			Text:         text,
@@ -330,18 +332,17 @@ func (c *Handler) executeChannelCommand(args *model.CommandArgs, p *TwilioPlugin
 			Text:         fmt.Sprintf("This channel is now linked to Twilio conversation %s.", conversationSid),
 		}
 	case "disconnect":
-		conversationSid, err := p.getChannelConversationSettings(args.ChannelId)
-		if err != nil || conversationSid == nil {
+		conversation, err := p.getChannelConversationSettings(args.ChannelId)
+		if err != nil || conversation == nil {
 			return &model.CommandResponse{
 				ResponseType: model.CommandResponseTypeEphemeral,
 				Text:         "This channel is not linked to a Twilio conversation.",
 			}
 		}
-		_ = p.API.KVDelete("twilio-by-Ch-" + args.ChannelId)
-		_ = p.API.KVDelete("twilio-by-Co-" + conversationSid.ConversationSid)
+		p.deleteConversationSettings(conversation)
 		return &model.CommandResponse{
 			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         fmt.Sprintf("This channel has been unlinked from Twilio conversation %s.", conversationSid.ConversationSid),
+			Text:         fmt.Sprintf("This channel has been unlinked from Twilio conversation %s.", conversation.ConversationSid),
 		}
 	}
 	return &model.CommandResponse{
@@ -386,16 +387,29 @@ func (c *Handler) executeConversationCommand(args *model.CommandArgs, p *TwilioP
 		if end > len(conversations) {
 			end = len(conversations)
 		}
+		totalCount := len(conversations)
 		conversations = conversations[page*20 : end]
 		text := "Twilio conversations:\n"
+		var wg sync.WaitGroup
+		guard := make(chan struct{}, 5) // limit to 5 concurrent goroutines
 		for _, conv := range conversations {
-			participants, err := p.twilio.GetConversationParticipants(*conv.Sid)
-			if err != nil {
-				text += fmt.Sprintf("- %s (could not get participants)\n", *conv.Sid)
-			} else {
-				text += fmt.Sprintf("- %s (participants: %s)\n", *conv.Sid, strings.Join(participants, ", "))
-			}
+			go func(conv openapi.ConversationsV1Conversation) {
+				guard <- struct{}{}
+				wg.Add(1)
+				defer func() {
+					<-guard
+					wg.Done()
+				}()
+				participants, err := p.twilio.GetConversationParticipants(*conv.Sid)
+				if err != nil {
+					text += fmt.Sprintf("- %s (could not get participants)\n", *conv.Sid)
+				} else {
+					text += fmt.Sprintf("- %s (participants: %s)\n", *conv.Sid, strings.Join(participants, ", "))
+				}
+			}(conv)
 		}
+		wg.Wait()
+		text += fmt.Sprintf("Showing %d to %d of %d conversations. Use /twilio conversation list %d to see the next page.", page*20+1, end, totalCount, page+1)
 		return &model.CommandResponse{
 			ResponseType: model.CommandResponseTypeEphemeral,
 			Text:         text,
